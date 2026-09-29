@@ -13,6 +13,7 @@
 提供 --audio 时，画面总时长自动等于音频时长，各场景按权重等比拉伸。
 """
 import argparse
+import bisect
 import json
 import math
 import os
@@ -89,17 +90,17 @@ def font(px):
 class Pen:
     """在 SS 倍画布上绘制，接受 1280x720 逻辑坐标。"""
 
-    def __init__(self, img, mode="RGBA"):
+    def __init__(self, img, mode="RGBA", k=SS):
         self.img = img
+        self.k = k
         self.d = ImageDraw.Draw(img, mode)
 
-    @staticmethod
-    def _w(width):
-        return max(1, round(width * SS))
+    def _w(self, width):
+        return max(1, round(width * self.k))
 
     def ellipse(self, cx, cy, rx, ry, fill=None, outline=None, width=0):
         rx, ry = abs(rx), abs(ry)
-        self.d.ellipse([(cx - rx) * SS, (cy - ry) * SS, (cx + rx) * SS, (cy + ry) * SS],
+        self.d.ellipse([(cx - rx) * self.k, (cy - ry) * self.k, (cx + rx) * self.k, (cy + ry) * self.k],
                        fill=fill, outline=outline, width=self._w(width) if outline else 0)
 
     def circle(self, cx, cy, r, fill=None, outline=None, width=0):
@@ -109,36 +110,36 @@ class Pen:
         x0, x1 = sorted((x0, x1))
         y0, y1 = sorted((y0, y1))
         r = max(0, min(r, (x1 - x0) / 2, (y1 - y0) / 2))
-        self.d.rounded_rectangle([x0 * SS, y0 * SS, x1 * SS, y1 * SS], radius=r * SS,
+        self.d.rounded_rectangle([x0 * self.k, y0 * self.k, x1 * self.k, y1 * self.k], radius=r * self.k,
                                  fill=fill, outline=outline, width=self._w(width) if outline else 0)
 
     def poly(self, pts, fill=None, outline=None, width=0):
-        self.d.polygon([(x * SS, y * SS) for x, y in pts], fill=fill, outline=outline,
+        self.d.polygon([(x * self.k, y * self.k) for x, y in pts], fill=fill, outline=outline,
                        width=self._w(width) if outline else 1)
 
     def line(self, pts, fill, width, cap=True):
-        self.d.line([(x * SS, y * SS) for x, y in pts], fill=fill, width=self._w(width), joint="curve")
+        self.d.line([(x * self.k, y * self.k) for x, y in pts], fill=fill, width=self._w(width), joint="curve")
         if cap:
             for x, y in (pts[0], pts[-1]):
                 self.circle(x, y, width / 2, fill=fill)
 
     def arc(self, cx, cy, rx, ry, a0, a1, fill, width):
-        self.d.arc([(cx - rx) * SS, (cy - ry) * SS, (cx + rx) * SS, (cy + ry) * SS], a0, a1,
+        self.d.arc([(cx - rx) * self.k, (cy - ry) * self.k, (cx + rx) * self.k, (cy + ry) * self.k], a0, a1,
                    fill=fill, width=self._w(width))
 
     def chord(self, cx, cy, rx, ry, a0, a1, fill=None, outline=None, width=0):
-        self.d.chord([(cx - rx) * SS, (cy - ry) * SS, (cx + rx) * SS, (cy + ry) * SS], a0, a1,
+        self.d.chord([(cx - rx) * self.k, (cy - ry) * self.k, (cx + rx) * self.k, (cy + ry) * self.k], a0, a1,
                      fill=fill, outline=outline, width=self._w(width) if outline else 0)
 
     def text(self, x, y, s, size, fill, anchor="mm", stroke=0, stroke_fill=None):
         if size < 1:
             return
-        self.d.text((x * SS, y * SS), s, font=font(size * SS), fill=fill, anchor=anchor,
-                    stroke_width=round(stroke * SS), stroke_fill=stroke_fill)
+        self.d.text((x * self.k, y * self.k), s, font=font(size * self.k), fill=fill, anchor=anchor,
+                    stroke_width=round(stroke * self.k), stroke_fill=stroke_fill)
 
     def text_size(self, s, size):
-        b = font(size * SS).getbbox(s)
-        return (b[2] - b[0]) / SS, (b[3] - b[1]) / SS
+        b = font(size * self.k).getbbox(s)
+        return (b[2] - b[0]) / self.k, (b[3] - b[1]) / self.k
 
 
 # ---------------------------------------------------------------- 小道具与特效
@@ -332,6 +333,16 @@ def face(p, cx, cy, r, expr, who, t):
         p.chord(cx, my - r * 0.2, r * 0.28, r * 0.22, 0, 180, fill=(170, 50, 60))
         p.ellipse(cx, my - r * 0.03, r * 0.12, r * 0.05, fill=(240, 120, 130))
         blush()
+    elif expr == "moved":
+        for s in (-1, 1):
+            p.arc(cx + s * dx, ey + er * 0.6, er * 1.3, er * 1.3, 200, 340, INK, lw)
+            p.line([(cx + s * (dx + er * 0.2), ey + er * 1.0), (cx + s * (dx + er * 0.7), cy + r * 0.85)],
+                   (120, 190, 255, 220), er * 1.0)
+            ph = (t * 1.5 + (s + 1) * 0.3) % 1
+            p.circle(cx + s * (dx + er * 0.9), cy + r * 0.8 + ph * r * 0.7, er * 0.6,
+                     fill=(120, 190, 255, int(230 * (1 - ph))))
+        p.arc(cx, my - r * 0.14, r * 0.22, r * 0.14, 20, 160, INK, lw * 1.2)
+        blush(0.6)
     elif expr == "tired":
         half_eyes(bags=True)
         brows(-0.7)
@@ -684,6 +695,7 @@ BACKGROUNDS = {
     "night": (((12, 18, 52), (58, 66, 122)), bg_night, None),
     "warm": (((255, 222, 178), (240, 190, 150)), bg_warm, (1100, 230, 520, (255, 235, 180), 0.55)),
     "sunset": (((120, 80, 150), (255, 190, 120)), bg_sunset, (640, 540, 700, (255, 220, 150), 0.5)),
+    "party": (((35, 15, 65), (90, 35, 120)), lambda p: None, None),
 }
 
 
@@ -797,15 +809,15 @@ def analyze_audio(ffmpeg, path, total, bpm=None, offset=None):
 
 def plan_scenes(total, rh, sections=None):
     """各场景起止时间：优先用歌曲段落，否则按权重分配；切点都吸附到拍点。"""
-    if sections and len(sections) == len(SCENES):
+    if sections and len(sections) == len(SECTIONS):
         starts = [0.0] + [rh.snap(s) for s in sections[1:]]
     else:
-        wsum, acc, starts = sum(s["w"] for s in SCENES), 0.0, [0.0]
-        for s in SCENES[:-1]:
+        wsum, acc, starts = sum(s["w"] for s in SECTIONS), 0.0, [0.0]
+        for s in SECTIONS[:-1]:
             acc += s["w"]
             starts.append(rh.snap_strong(total * acc / wsum))
     starts.append(total)
-    return [(starts[i], starts[i + 1] - starts[i]) for i in range(len(SCENES))]
+    return [(starts[i], starts[i + 1] - starts[i]) for i in range(len(SECTIONS))]
 
 
 # ---------------------------------------------------------------- 场景（跟节拍走）
@@ -1233,12 +1245,13 @@ def scene_night(p, c):
 def scene_warm(p, c):
     """一张画、一个拥抱，全家跟着节拍一起晃。"""
     t = c.t
-    dexpr = "tired" if not c.after(0.18) else "shock" if not c.after(0.3) else "happy"
+    dexpr = ("tired" if not c.after(0.14) else "shock" if not c.after(0.22) else
+             "moved" if not c.after(0.5) else "happy")
     hug = c.after(0.5)
     sway = 10 * c.swing(n=2) if hug else 0
-    bk, gk = c.ramp(0.02, 0.2), c.ramp(0.06, 0.26)
+    bk, gk = c.ramp(0.0, 0.14), c.ramp(0.02, 0.18)
     bx, gx = lerp(-120, 480, bk) + sway, lerp(1400, 800, gk) + sway
-    if c.after(0.3):   # 爱心：每拍从中间炸开一圈
+    if hug:   # 爱心：每拍从中间炸开一圈
         ph = c.bph()
         for i in range(10):
             ang = i * 2 * math.pi / 10 + c.bidx() * 0.3
@@ -1247,14 +1260,14 @@ def scene_warm(p, c):
     d = person(p, 640 + sway, 575, "dad", expr=dexpr,
                arms=((560 + sway, 470), (730 + sway, 470)) if hug else (15, 15), t=t, sit=True)
     p.rect(385, 525, 895, 580, fill=(215, 135, 110), r=14)
-    b = person(p, bx, 605 - (0 if hug else c.hop() * 12), "boy", expr="happy" if c.after(0.2) else "neutral",
-               arms=(165, 165) if c.after(0.24) else (30, 30), legs=c.walk(18) if 0 < bk < 1 else (0, 0), t=t)
+    b = person(p, bx, 605 - (0 if hug else c.hop() * 12), "boy", expr="happy" if c.after(0.14) else "neutral",
+               arms=(165, 165) if c.after(0.18) else (30, 30), legs=c.walk(18) if 0 < bk < 1 else (0, 0), t=t)
     person(p, gx, 605 - (0 if hug else c.hop(lag=0.5) * 12), "girl", expr="happy",
            arms=(40, 40) if not hug else ((690 + sway, 440), 30), legs=c.walk(18) if 0 < gk < 1 else (0, 0), t=t)
-    if c.after(0.24):
+    if c.after(0.18):
         lx, ly = b["lh"]
         rx, ry = b["rh"]
-        kk = clamp(c.since(0.24) / 0.3)
+        kk = clamp(c.since(0.18) / 0.3)
         kid_drawing(p, (lx + rx) / 2, min(ly, ry) - 92 + (1 - ease_out_back(kk)) * 40, alpha=kk)
     if hug:   # 彩纸雨
         rnd = random.Random(4)
@@ -1263,9 +1276,7 @@ def scene_warm(p, c):
             star(p, rnd.uniform(40, 1240) + math.sin(ph * 6 + i) * 20, -20 + ph * 740, 8,
                  rgba(rnd.choice(PALETTE), 0.9), rot=ph * 8)
     hx, hy, hr = d["head"]
-    if c.after(0.7):
-        p.circle(hx + hr * 0.52, hy + hr * 0.3 + c.bph() * 12, 4.5, fill=(140, 200, 255))
-    bubble(p, 440, 120, "爸爸，你辛苦啦！", (470, 180), size=30, alpha=c.win(0.26, 0.5))
+    bubble(p, 440, 120, "爸爸，你辛苦啦！", (470, 180), size=30, alpha=c.win(0.2, 0.46))
     bubble(p, 860, 170, "我们最爱你！", (810, 255), size=30, alpha=c.win(0.42, 0.7))
     bubble(p, 640, 110, "有你们真好。", (645, 190), size=30, alpha=c.win(0.74, 1.0))
 
@@ -1292,27 +1303,280 @@ def scene_end(p, c):
             p.text(640, y, text, size * ease_out_back(kk), rgba(col, kk), stroke=4, stroke_fill=rgba((150, 70, 90), kk))
 
 
-# 场景顺序对应歌曲结构（主歌铺垫、副歌爆发）。w：没有分段信息时的时长权重；
-# cam：每拍镜头推近的力度；shake：每拍震屏；captions：(进度, 字幕)，出现时刻吸附到拍点。
-SCENES = [
-    dict(bg="title", w=0.6, cam=0.8, draw=scene_title, captions=[]),
-    dict(bg="bedroom", w=1.3, cam=0.6, draw=scene_morning,
-         captions=[(0.0, "清晨六点半，闹钟还没响……"), (0.3, "娃，先“响”了！")]),
-    dict(bg="kitchen", w=1.2, cam=1.0, draw=scene_breakfast,
-         captions=[(0.0, "一边煎蛋，一边看娃"), (0.26, "一转身——"), (0.4, "牛奶洒了一地，早饭吃成了“战场”")]),
-    dict(bg="living", w=1.5, cam=0.6, draw=scene_work,
-         captions=[(0.0, "居家办公，爸爸在开会"), (0.2, "身后，两个娃在“打仗”"), (0.66, "会议开成了“现场直播”")]),
-    dict(bg="living", w=1.1, cam=1.1, draw=scene_fight,
-         captions=[(0.0, "抢玩具、告状、哭闹……"), (0.5, "爸爸每天都在“断案”")]),
-    dict(bg="study", w=1.6, cam=0.4, draw=scene_homework,
-         captions=[(0.0, "写作业时间到——"), (0.28, "一道题，讲了八遍"), (0.66, "忍住……一定要忍住……")]),
-    dict(bg="study", w=1.0, cam=1.6, shake=1.0, draw=scene_explode,
-         captions=[(0.0, "忍无可忍！"), (0.3, "爸爸原地爆炸，七窍生烟！")]),
-    dict(bg="night", w=1.1, cam=0.7, draw=scene_night,
-         captions=[(0.0, "夜深了，娃终于睡着了"), (0.3, "一个人，收拾满地狼藉"), (0.72, "可是……日子还得继续")]),
-    dict(bg="warm", w=1.3, cam=1.2, draw=scene_warm,
-         captions=[(0.0, "就在快要崩溃的时候……"), (0.24, "一张画，一句“爸爸辛苦啦”"), (0.6, "所有的烦恼，一下子都化了")]),
-    dict(bg="sunset", w=1.2, cam=0.5, draw=scene_end, captions=[]),
+# ---------------------------------------------------------------- 搞笑插卡（整屏，不依赖场景）
+
+YEL = ((255, 215, 80), (255, 165, 60))
+PINK = ((255, 160, 200), (245, 100, 150))
+BLUE = ((130, 205, 255), (70, 140, 230))
+RED = ((255, 120, 90), (215, 45, 45))
+GRN = ((160, 230, 140), (80, 185, 110))
+PURP = ((200, 150, 255), (130, 80, 220))
+
+
+def burst_bg(p, c, cols, cx=640, cy=380, n=18):
+    p.rect(0, 0, W, H, fill=cols[1])
+    rot = c.pos * 0.3
+    for i in range(n):
+        a0 = rot + i * 2 * math.pi / n
+        a1 = a0 + math.pi / n
+        p.poly([(cx, cy), (cx + math.cos(a0) * 1600, cy + math.sin(a0) * 1600),
+                (cx + math.cos(a1) * 1600, cy + math.sin(a1) * 1600)], fill=cols[0])
+
+
+def stamp_word(p, c, word, x, y, size, color=(230, 45, 40)):
+    kk = clamp(c.t / 0.16)
+    if kk <= 0:
+        return
+    sc = lerp(2.3, 1.0, kk * kk) * (1 + 0.1 * c.kick())
+    p.text(x + 6, y + 8, word, size * sc, rgba((0, 0, 0), 0.35 * kk))
+    p.text(x, y, word, size * sc, rgba(color, kk), stroke=10, stroke_fill=rgba(WHITE, kk))
+
+
+def gag_burst(p, c, word, who, expr, colors=YEL, steam_on=False):
+    """放射背景 + 超大头像 + 砸下来的大字。"""
+    burst_bg(p, c, colors)
+    for i in range(10):   # 四周的速度线
+        a = i * 2 * math.pi / 10 + 0.2
+        p.line([(640 + math.cos(a) * 420, 400 + math.sin(a) * 300), (640 + math.cos(a) * 900, 400 + math.sin(a) * 640)],
+               rgba(WHITE, 0.7), 8)
+    r = 165 * (1 + 0.07 * c.kick())
+    hy = 430 - c.hop() * 30
+    head(p, 640, hy, r, who, expr, t=c.t, red=0.7 if expr == "angry" else 0.0)
+    if steam_on:
+        steam(p, 640, hy, r, c.pos * 0.6, 1.0)
+    if expr in ("tired", "shock"):
+        sweat(p, 640 + r * 1.1, hy - r * 0.4, 45)
+    if expr == "angry":
+        anger_vein(p, 640 + r * 0.55, hy - r * 0.7, 34 + 12 * c.kick())
+    ph = c.bph()
+    for i in range(8):
+        a = i * math.pi / 4 + 0.4
+        star(p, 640 + math.cos(a) * (230 + ph * 200), 430 + math.sin(a) * (180 + ph * 150), 18, rgba(WHITE, 1 - ph))
+    stamp_word(p, c, word, 640, 120, 100)
+
+
+def gag_split(p, c, items):
+    """三格反应分屏，半拍弹出一格。items: [(角色, 表情, 标签, 底色), ...]"""
+    n = len(items)
+    pw = W / n
+    for i, (who, expr, label, col) in enumerate(items):
+        k = ease_out_back(clamp((c.beat - i * 0.5) / 0.3))
+        if k <= 0:
+            continue
+        oy = (1 - k) * -H
+        x0 = i * pw
+        p.rect(x0, oy, x0 + pw, oy + H, fill=col)
+        for j in range(-4, 12):   # 斜条纹
+            xx = x0 + j * 60 + (c.pos * 20) % 60
+            p.poly([(xx, oy), (xx + 25, oy), (xx - 175, oy + H), (xx - 200, oy + H)], fill=rgba(WHITE, 0.15))
+        hy = 320 + oy - c.hop(lag=i * 0.33) * 26
+        r = 115 * (1 + 0.06 * c.kick())
+        head(p, x0 + pw / 2, hy, r, who, expr, t=c.t, red=0.6 if expr == "angry" else 0.0)
+        if expr == "moved":
+            heart(p, x0 + pw / 2 + r, hy - r, 40, (240, 70, 100))
+        p.text(x0 + pw / 2, 580 + oy, label, 44, INK, stroke=6, stroke_fill=WHITE)
+    for i in range(1, n):
+        p.rect(i * pw - 5, 0, i * pw + 5, H, fill=WHITE)
+
+
+def gag_hud(p, c, title="爸爸耐心值", start=100, per=15):
+    """游戏血条：每拍掉一截。"""
+    p.rect(0, 0, W, H, fill=(35, 40, 75))
+    for x in range(0, W, 64):
+        p.line([(x, 0), (x, H)], (50, 58, 100), 2, cap=False)
+    for y in range(0, H, 64):
+        p.line([(0, y), (W, y)], (50, 58, 100), 2, cap=False)
+    i = max(0, c.bidx() + 1)
+    v1 = max(0, start - per * i)
+    v0 = max(0, start - per * (i - 1)) if i > 0 else start
+    v = lerp(v0, v1, clamp(c.bph() / 0.2))
+    empty = v1 <= 0
+    expr = "neutral" if v > 60 else "tired" if v > 25 else "angry"
+    hx, hy = 290 + (math.sin(c.t * 50) * 6 if empty else 0), 380 - c.hop() * 12
+    head(p, hx, hy, 130, "dad", expr, t=c.t, red=clamp((60 - v) / 60) * 0.7)
+    if expr != "neutral":
+        sweat(p, hx + 150, hy - 60, 40)
+    p.text(820, 230, title, 54, WHITE, stroke=5, stroke_fill=(20, 20, 40))
+    p.rect(500, 300, 1160, 390, fill=(20, 20, 35), r=18, outline=WHITE, width=5)
+    col = mix((235, 55, 45), (90, 210, 110), v / 100)
+    if v > 0:
+        p.rect(510, 310, 510 + 640 * v / 100, 380, fill=col, r=12)
+    p.text(830, 450, f"{int(round(v))}%", 64, col, stroke=5, stroke_fill=(20, 20, 40))
+    if i > 0 and v0 > 0:
+        ph = c.bph()
+        p.text(530 + 640 * v1 / 100 + 40, 290 - ph * 90, f"-{per}", 48, rgba((255, 80, 70), 1 - ph), stroke=4,
+               stroke_fill=rgba(WHITE, 1 - ph))
+    if empty and c.bidx() % 2 == 0:
+        p.rect(0, 0, W, H, fill=(255, 0, 0, 50))
+        p.text(830, 560, "警告！耐心已耗尽！", 50, (255, 230, 60), stroke=5, stroke_fill=(150, 0, 0))
+
+
+def gag_vs(p, c):
+    """格斗游戏风：哥哥 VS 妹妹。"""
+    k = ease_out_back(clamp(c.beat / 0.35))
+    p.poly([(0, 0), (700 * k, 0), (580 * k, H), (0, H)], fill=(230, 80, 70))
+    p.poly([(W, 0), (W - 580 * k, 0), (W - 700 * k, H), (W, H)], fill=(255, 190, 60))
+    head(p, 300 * k - 20, 360 - c.hop() * 24, 150, "boy", "angry", t=c.t)
+    head(p, W - 300 * k + 20, 360 - c.hop(lag=0.5) * 24, 150, "girl", "angry", t=c.t)
+    p.text(270, 610, "哥哥", 56, WHITE, stroke=6, stroke_fill=INK)
+    p.text(1010, 610, "妹妹", 56, WHITE, stroke=6, stroke_fill=INK)
+    ph = c.bph()   # 中间的闪电
+    p.line([(650, 60), (600, 300), (690, 330), (620, 660)], rgba((255, 255, 200), 1 - ph * 0.7), 14 + 10 * (1 - ph))
+    kk = clamp((c.beat - 0.5) / 0.2)
+    if kk > 0:
+        sc = lerp(2.5, 1.0, kk * kk) * (1 + 0.12 * c.kick())
+        p.text(640, 360, "VS", 150 * sc, rgba((255, 240, 80), kk), stroke=12, stroke_fill=rgba(INK, kk))
+
+
+GAGS = dict(burst=gag_burst, split=gag_split, hud=gag_hud, vs=gag_vs)
+
+
+def B(word, who, expr, colors=YEL, beats=1, **kw):
+    return ("@burst", beats, dict(word=word, who=who, expr=expr, colors=colors, **kw))
+
+
+def SPLIT(*items, beats=2):
+    return ("@split", beats, dict(items=list(items)))
+
+
+# ---------------------------------------------------------------- 蹦迪派对（尾声前的欢乐段）
+
+def scene_party(p, c):
+    k = c.kick()
+    for i in range(5):   # 旋转的舞台灯
+        x0 = 140 + i * 250
+        ang = math.sin(c.pos * math.pi / 2 + i * 1.3) * 0.55
+        col = PALETTE[(i + c.bidx()) % len(PALETTE)]
+        p.poly([(x0, -10), (x0 + math.sin(ang - 0.14) * 900, 700), (x0 + math.sin(ang + 0.14) * 900, 700)],
+               fill=rgba(col, 0.16 + 0.22 * k))
+    for j in range(2):   # 每拍换色的地板
+        for i in range(10):
+            col = PALETTE[(i + j + c.bidx()) % len(PALETTE)]
+            p.rect(i * 128, 570 + j * 75, i * 128 + 126, 643 + j * 75, fill=mix(col, (40, 20, 70), 0.55 - 0.45 * k))
+    p.line([(640, 0), (640, 50)], (200, 200, 210), 3)   # 迪斯科球
+    p.circle(640, 95, 48, fill=(200, 205, 220))
+    for gx in range(-40, 50, 16):
+        p.line([(640 + gx, 52), (640 + gx, 138)], (150, 155, 175), 2, cap=False)
+    ph = c.bph()
+    for i in range(8):
+        a = i * math.pi / 4 + c.bidx() * 0.4
+        star(p, 640 + math.cos(a) * (60 + ph * 120), 95 + math.sin(a) * (40 + ph * 90), 8, rgba(WHITE, 1 - ph))
+    style = (c.bidx() // 4) % 3
+    sw = c.swing()
+    for who, x, lag in (("boy", 390, 0.5), ("dad", 640, 0.0), ("girl", 890, 0.5)):
+        if style == 0:
+            arms = (90 + 70 * sw, 90 - 70 * sw)
+        elif style == 1:
+            arms = (150 + 22 * sw, 150 - 22 * sw)
+        else:
+            arms = (20, 155) if c.bidx() % 2 == 0 else (155, 20)
+        hop = c.hop(lag=lag) * (35 if who != "dad" else 20)
+        person(p, x + (sw * 14 if style == 1 else 0), 600 - hop, who, expr="happy" if who != "boy" else "mischief",
+               arms=arms, legs=c.walk(12) if style != 1 else (-10, 10), t=c.t)
+    rnd = random.Random(12)
+    for i in range(10):
+        ph2 = (c.pos * 0.3 + rnd.random()) % 1
+        note(p, rnd.uniform(60, 1220), 560 - ph2 * 520, 22, rgba(rnd.choice(PALETTE), 1 - ph2))
+
+
+# ---------------------------------------------------------------- 分镜：机位 + 每段镜头表
+
+# 每个场景世界的机位：(缩放, 中心 x, 中心 y)
+FRAMES = {
+    "title": dict(wide=(1, 640, 360), letters=(1.6, 640, 220), kids=(1.7, 640, 560)),
+    "morning": dict(wide=(1, 640, 360), dad=(2.3, 385, 390), kids=(1.7, 710, 330), clock=(2.6, 1080, 185),
+                    bed=(1.35, 620, 430)),
+    "breakfast": dict(wide=(1, 640, 360), dad=(2.0, 990, 320), egg=(2.3, 930, 280), girl=(2.1, 640, 420),
+                      boy=(2.1, 400, 420), cup=(2.4, 770, 440)),
+    "work": dict(wide=(1, 640, 360), dad=(2.1, 380, 320), kids=(1.8, 980, 360)),
+    "fight": dict(wide=(1, 640, 360), robot=(2.2, 640, 400), boy=(2.0, 470, 420), girl=(2.0, 820, 420),
+                  dad=(2.0, 1090, 330)),
+    "homework": dict(wide=(1, 640, 360), dad=(2.3, 990, 300), boy=(2.2, 610, 420), girl=(2.0, 262, 380),
+                     book=(2.8, 610, 470)),
+    "explode": dict(wide=(1, 640, 360), dad=(1.75, 960, 290), meter=(2.0, 1130, 330), kids=(1.6, 430, 470),
+                    title=(1.8, 560, 170)),
+    "night": dict(wide=(1, 640, 360), dad=(2.0, 640, 420), box=(1.7, 760, 460), sky=(1.5, 900, 220)),
+    "warm": dict(wide=(1, 640, 360), dad=(2.4, 640, 330), drawing=(2.3, 480, 300), kids=(1.6, 640, 420),
+                 hug=(1.4, 640, 400)),
+    "party": dict(wide=(1, 640, 360), dad=(2.0, 640, 330), kids=(1.5, 640, 450), ball=(2.2, 640, 150)),
+    "end": dict(wide=(1, 640, 360), family=(1.4, 640, 480)),
+}
+
+
+def SEC(world, bg, shots, w=1.0, cam=0.8, flash=False, shake=0.0, tr=None):
+    return dict(world=world, name=world.__name__[6:], bg=bg, shots=shots, w=w, cam=cam, flash=flash,
+                shake=shake, tr=tr)
+
+
+# 镜头：(机位, 拍数, 运镜)；运镜 push 推 / pull 拉 / panL panR 摇 / tilt 斜角 / shake 震；
+# 以 @ 开头的是整屏插卡。每段镜头按顺序排，超出段落长度的部分截掉。
+SECTIONS = [
+    SEC(scene_title, "title", [("wide", 4, "push"), ("kids", 2, "panR"), ("letters", 2, "push")], w=0.6),
+    SEC(scene_morning, "bedroom", [
+        ("wide", 2, "push"), ("dad", 2, "push"), ("kids", 2, "panL"), ("clock", 1, "tilt"), ("bed", 1, None),
+        ("kids", 2, "push"), ("clock", 1, "shake"), ("dad", 1, "push"),
+        B("救命！", "dad", "shock", BLUE),
+        ("kids", 2, "tilt"), ("wide", 2, "push"),
+        SPLIT(("dad", "tired", "困到怀疑人生", (170, 200, 240)), ("boy", "happy", "电量满格", (255, 190, 120)),
+              ("girl", "mischief", "蹦蹦蹦", (255, 180, 210))),
+        ("dad", 2, "pull"), ("kids", 2, "panR"), ("wide", 2, "tilt"), ("clock", 1, "shake"), ("wide", 4, "push")],
+        w=1.3, cam=0.7),
+    SEC(scene_breakfast, "kitchen", [
+        ("wide", 2, "push"), ("boy", 1, "shake"), ("girl", 1, None), ("dad", 2, "push"), ("cup", 1, "push"),
+        B("哗——！", "girl", "shock", BLUE),
+        ("cup", 2, "push"), ("dad", 1, "shake"), B("我的天！", "dad", "shock", YEL),
+        SPLIT(("girl", "shock", "闯祸了", (150, 200, 255)), ("boy", "mischief", "看热闹", (255, 200, 110)),
+              ("dad", "tired", "心好累", (200, 200, 210))),
+        ("egg", 2, "push"), ("wide", 2, "tilt"), ("boy", 1, "push"), ("girl", 1, "push"), ("dad", 2, "pull"),
+        ("wide", 3, "push")], w=1.2, cam=1.2, flash=True),
+    SEC(scene_work, "living", [
+        ("wide", 2, "push"), ("dad", 2, "push"), ("kids", 2, "panR"), ("dad", 1, None), ("kids", 1, "shake"),
+        ("wide", 2, "tilt"), ("@hud", 4, dict(title="爸爸耐心值", start=100, per=12)),
+        ("dad", 2, "push"), ("kids", 2, "push"), B("砰！", "boy", "mischief", PINK), B("啪！", "girl", "happy", YEL),
+        ("dad", 1, "shake"), ("dad", 2, "push"), B("安静！！", "dad", "angry", RED),
+        ("wide", 2, "push"), ("kids", 2, "tilt"), ("wide", 2, "push")], w=1.5, cam=0.8),
+    SEC(scene_fight, "living", [
+        ("@vs", 2, {}), ("robot", 1, "shake"), ("boy", 1, None), ("girl", 1, None), ("robot", 1, "shake"),
+        ("wide", 2, "push"), B("是我的！", "boy", "angry", RED), B("我先拿的！", "girl", "angry", YEL),
+        ("wide", 2, "tilt"), ("dad", 2, "push"), ("girl", 1, "push"), B("哇——！", "girl", "cry", BLUE),
+        ("robot", 1, "shake"), ("boy", 1, None), ("dad", 2, "pull"),
+        SPLIT(("dad", "tired", "断案中", (200, 200, 215)), ("boy", "angry", "不服", (255, 150, 130)),
+              ("girl", "cry", "委屈", (160, 210, 255))),
+        ("wide", 2, "shake")], w=1.1, cam=1.3, flash=True),
+    SEC(scene_homework, "study", [
+        ("wide", 2, "push"), ("boy", 2, "panL"), ("girl", 2, "push"), ("dad", 2, "push"), ("book", 1, None),
+        ("boy", 1, None), ("wide", 2, "tilt"), ("dad", 2, "push"), B("第八遍了……", "dad", "tired", GRN),
+        ("boy", 2, "push"), ("girl", 1, "shake"), ("dad", 2, "push"),
+        ("@hud", 4, dict(title="爸爸耐心值", start=60, per=15)),
+        ("dad", 2, "push"), ("boy", 1, None), ("dad", 1, "push"), ("dad", 2, "shake"), ("wide", 2, "push"),
+        ("dad", 2, "push")], w=1.6, cam=0.6),
+    SEC(scene_explode, "study", [
+        B("七窍生烟！", "dad", "angry", RED, steam_on=True), ("wide", 1, "shake"), ("dad", 1, "shake"),
+        ("meter", 1, "push"), ("kids", 1, "shake"), B("啊啊啊！", "dad", "angry", RED, steam_on=True),
+        ("wide", 1, "tilt"), ("dad", 1, "shake"),
+        SPLIT(("dad", "angry", "暴走中", (255, 120, 100)), ("boy", "shock", "瑟瑟发抖", (170, 200, 255)),
+              ("girl", "shock", "捂住耳朵", (255, 200, 120))),
+        ("title", 1, "shake"), ("dad", 1, "shake"), ("kids", 1, None), B("冷静！冷静！", "boy", "shock", BLUE),
+        ("wide", 2, "shake"), ("meter", 1, "shake"), ("dad", 1, "push"), ("wide", 2, "shake")],
+        w=1.0, cam=1.8, flash=True, shake=1.0),
+    SEC(scene_night, "night", [
+        ("wide", 4, "push"), ("dad", 2, "panR"), ("box", 2, "push"), ("wide", 2, "pull"), ("box", 2, None),
+        ("sky", 2, "panL"), ("dad", 2, "push"), ("wide", 3, "pull"), ("dad", 2, "push")],
+        w=1.1, cam=0.6, tr="iris"),
+    SEC(scene_warm, "warm", [
+        ("wide", 4, "push"), ("drawing", 2, "push"), ("dad", 3, "push"), ("drawing", 2, "pull"), ("dad", 1, "push"),
+        ("hug", 2, "push"), B("最爱爸爸！", "girl", "happy", PINK), B("爸爸辛苦啦！", "boy", "happy", YEL),
+        ("wide", 2, "tilt"), ("dad", 1, "push"), ("kids", 1, "push"),
+        SPLIT(("dad", "moved", "感动哭了", (255, 190, 170)), ("boy", "happy", "开心", (255, 215, 120)),
+              ("girl", "happy", "爱你哟", (255, 170, 205))),
+        ("hug", 2, "shake"), ("wide", 2, "push"), ("hug", 2, "pull")], w=1.3, cam=1.2, flash=True, tr="heart"),
+    SEC(scene_party, "party", [
+        ("wide", 2, "push"), ("dad", 1, "shake"), ("kids", 1, "shake"), ("ball", 1, "push"), ("wide", 2, "tilt"),
+        ("kids", 1, "push"), ("dad", 1, "push"),
+        SPLIT(("boy", "mischief", "嗨起来", (120, 220, 255)), ("dad", "happy", "蹦迪", (255, 140, 200)),
+              ("girl", "happy", "转圈圈", (255, 220, 100))),
+        ("wide", 2, "shake")], w=0.8, cam=1.3, flash=True),
+    SEC(scene_end, "sunset", [("wide", 5, "pull"), ("family", 5, "push")], w=0.7, cam=0.4, tr="diag"),
 ]
 
 
@@ -1363,11 +1627,11 @@ def hsv(h, s=0.65, v=1.0):
     return tuple(int(c * 255) for c in colorsys.hsv_to_rgb(h % 1, s, v))
 
 
-def draw_lyric(p, text, lt, dur, idx, effect=None):
+def draw_lyric(p, text, lt, dur, idx, effect=None, kick=0.0):
     """逐字特效。每句轮换一种效果（也可在 LRC 中用 {效果名} 指定），并在句首放一次粒子爆发。"""
-    size = 46
-    f = font(size * SS)
-    widths = [f.getlength(ch) / SS for ch in text]
+    size = 46 * (1 + 0.06 * kick)
+    f = font(size * p.k)
+    widths = [f.getlength(ch) / p.k for ch in text]
     total = sum(widths)
     if total > W - 120:
         size *= (W - 120) / total
@@ -1471,17 +1735,6 @@ def parse_lyrics(path, offset, total):
     return lines
 
 
-def story_lines(times, rh):
-    """故事字幕：每句的出现时刻吸附到拍点。"""
-    lines = []
-    for sc, (st, d) in zip(SCENES, times):
-        starts = [st if a == 0 else max(st, rh.snap(st + a * d)) for a, _ in sc["captions"]]
-        for j, (_, text) in enumerate(sc["captions"]):
-            end = starts[j + 1] if j + 1 < len(starts) else st + d
-            lines.append((starts[j], end, text, None))
-    return lines
-
-
 # ---------------------------------------------------------------- 场景转场
 
 TRANSITIONS = ["iris", "slide", "heart", "diag", "stars", "zoom", "blinds", "iris", "heart"]
@@ -1503,8 +1756,9 @@ def transition(a_img, b_img, k, kind):
         x0, y0 = (size[0] - cw) // 2, (size[1] - ch) // 2
         za = a_img.crop((x0, y0, x0 + cw, y0 + ch)).resize(size, Image.BILINEAR)
         return Image.blend(za, b_img, k)
+    k_px = size[0] / W
     mask = Image.new("L", size, 0)
-    m = Pen(mask, None)
+    m = Pen(mask, None, k_px)
     deco = []
     if kind == "iris":
         r = k * 780
@@ -1532,7 +1786,7 @@ def transition(a_img, b_img, k, kind):
             m.rect(x0, 0, x0 + W / 10 * kk + 1, H, fill=255)
     out = Image.composite(b_img, a_img, mask)
     if deco and 0 < k < 1:
-        p = Pen(out)
+        p = Pen(out, k=k_px)
         for d in deco:
             d(p)
     return out
@@ -1544,49 +1798,103 @@ def init_worker(cfg):
     CFG.update(cfg)
 
 
-def locate(t):
-    for k, (start, dur) in enumerate(CFG["times"]):
-        if t < start + dur or k == len(CFG["times"]) - 1:
-            return k, min(t - start, dur - 1e-6), dur
+def build_shots(times, rh):
+    """把每段的镜头表展开成绝对时间：[(段落序号, 开始, 结束, 镜头)]，切点都在拍点上。"""
+    out = []
+    for k, (sec, (st, d)) in enumerate(zip(SECTIONS, times)):
+        end, t0, i = st + d, st, 0
+        while t0 < end - 1e-3:
+            shot = sec["shots"][i % len(sec["shots"])]
+            t1 = min(end, rh.t_of(math.floor(rh.pos(t0) + 1e-6) + shot[1]))
+            if end - t1 < rh.P * 0.5:   # 段尾剩不到半拍，并进当前镜头
+                t1 = end
+            out.append((k, t0, t1, shot))
+            t0, i = t1, i + 1
+    return out
 
 
-def render_scene(k, lt):
-    sc = SCENES[k]
-    start, dur = CFG["times"][k]
-    img = background(sc["bg"]).copy()
-    sc["draw"](Pen(img), Ctx(lt, dur, start))
+def locate_shot(t):
+    j = bisect.bisect_right(CFG["shot_starts"], t) - 1
+    return CFG["shots"][max(0, j)]
+
+
+def render_world(k, t):
+    sec = SECTIONS[k]
+    st, d = CFG["times"][k]
+    img = background(sec["bg"]).copy()
+    sec["world"](Pen(img), Ctx(clamp(t - st, 0, d - 1e-6), d, st))
     return img
 
 
-def camera(img, t, sc):
-    """每拍镜头轻推一下（鼓点越重、音乐越满推得越多），爆发场景再加震屏。"""
+def shoot(img, framing, move, q, t, sec, s0):
+    """机位取景 + 运镜 + 每拍镜头冲击 + 震屏，输出 1x 画面。"""
     rh = CFG["rhythm"]
+    z, cx, cy = framing
     x = rh.pos(t)
     kick = math.exp(-(x - math.floor(x)) * 6) * (0.55 + 0.45 * rh.accent(math.floor(x)))
-    z = 1 + 0.03 * sc.get("cam", 0.6) * kick * (0.4 + 0.6 * rh.energy_at(t))
-    shake = sc.get("shake", 0) * kick
-    if z < 1.001 and shake < 0.01:
-        return img
-    rnd = random.Random(math.floor(x))
-    cw, ch = W / z, H / z
-    x0 = clamp((W - cw) / 2 + rnd.uniform(-1, 1) * 10 * shake, 0, W - cw)
-    y0 = clamp((H - ch) / 2 + rnd.uniform(-1, 1) * 8 * shake, 0, H - ch)
-    return img.transform((W, H), Image.EXTENT, (x0, y0, x0 + cw, y0 + ch), Image.BILINEAR)
+    if move == "push":
+        z *= 1 + 0.16 * q
+    elif move == "pull":
+        z *= 1.16 - 0.16 * q
+    elif move in ("panL", "panR"):
+        z *= 1.12
+        cx += (1 if move == "panR" else -1) * (q - 0.5) * 110
+    z *= 1 + 0.04 * sec["cam"] * kick * (0.4 + 0.6 * rh.energy_at(t))
+    shake = sec["shake"] * kick + (0.9 * kick if move == "shake" else 0)
+    rot = (5.0 if int(s0 * 10) % 2 else -5.0) if move == "tilt" else 0.0
+    if shake > 0.01:
+        rnd = random.Random(math.floor(x) * 7 + int(s0 * 100))
+        cx += rnd.uniform(-1, 1) * 18 * shake / z
+        cy += rnd.uniform(-1, 1) * 12 * shake / z
+        rot += rnd.uniform(-1, 1) * 2.0 * shake
+    rr = math.radians(abs(rot))
+    pad = math.cos(rr) + (W / H) * math.sin(rr) + 0.01 if rr > 0.001 else 1.0   # 旋转时多取一圈，避免黑边
+    cw, ch = min(W, W / z * pad), min(H, H / z * pad)
+    x0, y0 = clamp(cx - cw / 2, 0, W - cw), clamp(cy - ch / 2, 0, H - ch)
+    ow, oh = (round(W * pad), round(H * pad)) if pad > 1 else (W, H)
+    out = img.resize((ow, oh), Image.BICUBIC, box=(x0 * SS, y0 * SS, (x0 + cw) * SS, (y0 + ch) * SS),
+                     reducing_gap=2.0)
+    if pad > 1:
+        out = out.rotate(rot, resample=Image.BICUBIC)
+        l, tp = (ow - W) // 2, (oh - H) // 2
+        out = out.crop((l, tp, l + W, tp + H))
+    return out
+
+
+def render_shot(entry, t):
+    k, s0, s1, shot = entry
+    q = clamp((t - s0) / max(1e-6, s1 - s0))
+    if shot[0].startswith("@"):
+        img = Image.new("RGB", (W * SS, H * SS), WHITE)
+        GAGS[shot[0][1:]](Pen(img), Ctx(t - s0, s1 - s0, s0), **shot[2])
+        framing, move = (1, 640, 360), None
+    else:
+        img = render_world(k, t)
+        framing = FRAMES[SECTIONS[k]["name"]].get(shot[0], (1, 640, 360))
+        move = shot[2] if len(shot) > 2 else None
+    return shoot(img, framing, move, q, t, SECTIONS[k], s0)
 
 
 def render_frame(i):
     t = i / CFG["fps"]
-    k, lt, dur = locate(t)
-    img = render_scene(k, lt)
-    tr = CFG["tr"]
-    if k > 0 and lt < tr:   # 转场从拍点开始，持续一拍
-        prev = render_scene(k - 1, CFG["times"][k - 1][1] - 1e-3)
-        img = transition(prev, img, lt / tr, TRANSITIONS[(k - 1) % len(TRANSITIONS)])
-    p = Pen(img)
-    for j, (st, en, text, eff) in enumerate(CFG["lines"]):
-        if st <= t < en:
-            draw_lyric(p, text, t - st, en - st, j, eff)
-    img = camera(img.reduce(SS), t, SCENES[k])
+    entry = locate_shot(t)
+    k, s0 = entry[0], entry[1]
+    sec = SECTIONS[k]
+    img = render_shot(entry, t)
+    st = CFG["times"][k][0]
+    trd = CFG["rhythm"].P * 0.5
+    if sec["tr"] and k > 0 and t - st < trd:   # 少数段落用半拍的形状转场
+        prev = render_shot(locate_shot(st - 1e-3), st - 1e-3)
+        img = transition(prev, img, (t - st) / trd, sec["tr"])
+    elif sec["flash"] and t - s0 < 0.1:        # 副歌：每次切镜头闪一下白
+        img = Image.blend(img, Image.new("RGB", img.size, WHITE), 0.45 * (1 - (t - s0) / 0.1))
+    rh = CFG["rhythm"]
+    x = rh.pos(t)
+    kick = math.exp(-(x - math.floor(x)) * 6)
+    p = Pen(img, k=1)
+    for j, (ls, le, text, eff) in enumerate(CFG["lines"]):
+        if ls <= t < le:
+            draw_lyric(p, text, t - ls, le - ls, j, eff, kick)
     f = clamp(min(t / 0.6, (CFG["total"] - t) / 1.5))  # 片头淡入、片尾淡出
     if f < 1:
         img = Image.blend(Image.new("RGB", img.size), img, f)
@@ -1628,7 +1936,7 @@ def main():
     ap.add_argument("--fps", type=int, default=FPS)
     ap.add_argument("--lyrics", help="歌词文件（.lrc/.srt/.vtt/.txt），每句自动配特效")
     ap.add_argument("--lyrics-offset", type=float, default=0.0, help="歌词整体偏移（秒，可为负）")
-    ap.add_argument("--no-subs", action="store_true", help="不显示字幕/歌词")
+    ap.add_argument("--no-subs", action="store_true", help="不显示歌词")
     ap.add_argument("--font", help="中文字体路径")
     ap.add_argument("--workers", type=int, default=os.cpu_count())
     ap.add_argument("--stills", help="只导出每个场景的截图到该目录")
@@ -1653,26 +1961,25 @@ def main():
         rh = Rhythm(bpm or 100.0, offset or 0.0, total)
     times = plan_scenes(total, rh, song.get("sections"))
     print(f"节拍：{rh.bpm:.1f} BPM，第一拍 {rh.offset:.3f}s")
-    for sc, (st, d) in zip(SCENES, times):
-        print(f"  {sc['draw'].__name__:<16} {st:7.2f}s  +{d:5.2f}s  (第 {rh.pos(st):.1f} 拍)")
-    if args.no_subs:
-        lines = []
-    elif args.lyrics:
+    shots = build_shots(times, rh)
+    for k, (sc, (st, d)) in enumerate(zip(SECTIONS, times)):
+        n = sum(1 for e in shots if e[0] == k)
+        print(f"  {sc['name']:<10} {st:7.2f}s  +{d:5.2f}s  第 {rh.pos(st):5.1f} 拍起  {n:2d} 个镜头")
+    print(f"共 {len(shots)} 个镜头，平均 {total / len(shots):.2f} 秒一切")
+    lines = []   # 只显示歌词（由 --lyrics 提供），不再显示场景字幕
+    if args.lyrics and not args.no_subs:
         lines = parse_lyrics(args.lyrics, args.lyrics_offset, total)
         print(f"读取歌词 {len(lines)} 句")
-    else:
-        lines = story_lines(times, rh)
     cfg = dict(font=find_font(args.font), fps=args.fps, times=times, total=total, lines=lines,
-               rhythm=rh, tr=rh.P if rh.P >= 0.45 else 2 * rh.P)
+               rhythm=rh, shots=shots, shot_starts=[e[1] for e in shots])
 
     if args.stills:
         init_worker(cfg)
         os.makedirs(args.stills, exist_ok=True)
-        for k, (st, d) in enumerate(times):
-            for frac in (0.02, 0.2, 0.5, 0.85):
-                i = int((st + d * frac) * args.fps)
-                img = Image.frombytes("RGB", (W, H), render_frame(i))
-                img.save(os.path.join(args.stills, f"{k:02d}_{SCENES[k]['bg']}_{int(frac * 100)}.png"))
+        for j, (k, s0, s1, shot) in enumerate(shots):
+            i = int((s0 + (s1 - s0) * 0.6) * args.fps)
+            img = Image.frombytes("RGB", (W, H), render_frame(i))
+            img.save(os.path.join(args.stills, f"{j:03d}_{SECTIONS[k]['name']}_{shot[0].lstrip('@')}.png"))
         print(f"截图已导出到 {args.stills}")
         return
 

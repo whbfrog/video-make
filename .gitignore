@@ -4,3 +4,4 @@ __pycache__/
 lyrics/*.lrc
 !lyrics/example.lrc
 *.mp4
+!lyrics/pdoom_timing.lrc
