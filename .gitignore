@@ -1,0 +1,6 @@
+audio/
+output/
+__pycache__/
+lyrics/*.lrc
+!lyrics/example.lrc
+*.mp4
