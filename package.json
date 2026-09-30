@@ -1,0 +1,14 @@
+{
+  "name": "naiba-diary",
+  "version": "2.0.0",
+  "private": true,
+  "description": "奶爸日记：p5.brush 水彩动画 MV，逐帧在无头 Chromium 中渲染",
+  "type": "module",
+  "dependencies": {
+    "@fontsource/permanent-marker": "^5.2.5",
+    "@fontsource/zcool-kuaile": "^5.2.5",
+    "p5": "2.3.3",
+    "p5.brush": "2.2.3",
+    "puppeteer-core": "25.11.0"
+  }
+}

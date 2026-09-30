@@ -1,7 +1,9 @@
+node_modules/
+out/
 audio/
 output/
 __pycache__/
+*.mp4
 lyrics/*.lrc
 !lyrics/example.lrc
-*.mp4
 !lyrics/pdoom_timing.lrc
