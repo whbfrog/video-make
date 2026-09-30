@@ -4,6 +4,7 @@
 //   node render.mjs --clip=0:6 --out=out/clip.mp4                            带音频的短片
 //   node render.mjs --frames=0:156.65 --workers=4                            全片逐帧 → out/frames（可断点续渲）
 //   node render.mjs --encode --out=out/naiba.mp4                             帧 + 原曲 → MP4
+// 有显卡的机器加 --gpu（更快，并用真正的水彩晕染）；Chrome 不在常见位置时加 --chrome=<路径>
 // 可选：--lyrics=lyrics/xxx.lrc 显示歌词条；--song=songs/pdoom.json 指定音频
 import puppeteer from 'puppeteer-core';
 import { spawn } from 'node:child_process';
@@ -13,7 +14,17 @@ import { pathToFileURL } from 'node:url';
 import imageFfmpeg from './ffmpeg-path.mjs';
 
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const [k, v] = a.replace(/^--/, '').split('='); return [k, v ?? true]; }));
-const CHROME = args.chrome || process.env.CHROME || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+// Chrome 路径：--chrome=… / 环境变量 CHROME / 常见安装位置
+const CHROME = args.chrome || process.env.CHROME || [
+  'C:/Program Files/Google/Chrome/Application/chrome.exe',
+  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser',
+  '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'].find(p => existsSync(p));
+// --gpu：用显卡渲染，并换回 p5.brush 真正的水彩晕染（画质更好）；默认用 SwiftShader 软件渲染
+const GL_ARGS = args.gpu ? ['--ignore-gpu-blocklist', '--enable-gpu-rasterization', '--enable-webgl']
+  : ['--ignore-gpu-blocklist', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
+const PAGE_QS = args.gpu ? '?render&realfill' : '?render';
 const SONG = JSON.parse(readFileSync(args.song || 'songs/pdoom.json', 'utf8'));
 const AUDIO = SONG.audio, FFMPEG = imageFfmpeg();
 const fps = +(args.fps || 24), FRAMES_DIR = 'out/frames';
@@ -55,14 +66,14 @@ const GLYPHS = [...new Set((srcTxt.join('') + LY.map(l => l[2]).join('')).replac
 
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: true, protocolTimeout: 0,
-  args: ['--allow-file-access-from-files', '--ignore-gpu-blocklist', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
+  args: ['--allow-file-access-from-files', ...GL_ARGS,
     '--window-size=1920,1080', '--disable-renderer-backgrounding', '--disable-background-timer-throttling', '--no-sandbox']
 });
 async function openPage(tag = '') {
   const page = await browser.newPage();
   page.on('console', m => { if (['error', 'warn'].includes(m.type())) console.log(`[page${tag}]`, m.text()); });
   page.on('pageerror', e => console.log(`[page error${tag}]`, e.message));
-  await page.goto(pathToFileURL(resolve('studio.html')).href + '?render', { waitUntil: 'networkidle0' });
+  await page.goto(pathToFileURL(resolve('studio.html')).href + PAGE_QS, { waitUntil: 'networkidle0' });
   await page.waitForFunction('window.ready === true', { timeout: 120000 });
   await page.evaluate((ly, dur, g) => { window.LY = ly; DUR = dur; return window.preloadGlyphs(g); }, LY, DUR, GLYPHS);
   return page;

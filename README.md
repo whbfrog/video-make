@@ -39,7 +39,9 @@ node render.mjs --frames=0:157 --workers=4                         # 全片逐�
 node render.mjs --encode --out=out/naiba.mp4                       # 帧 + 原曲 → MP4
 ```
 
-- 默认用 `/opt/pw-browsers/.../chrome`，别的机器用 `--chrome=<路径>` 或环境变量 `CHROME`。
+- **有显卡的机器加 `--gpu`**：速度快很多，并换回 p5.brush 真正的水彩晕染。例：`node render.mjs --frames=0:157 --workers=4 --gpu`
+- 会自动在常见位置找 Chrome（Windows / Mac / Linux），找不到时用 `--chrome=<路径>` 或环境变量 `CHROME`。
+- 音频不在仓库里：从 [PDoomVideo](https://github.com/JohnHeibel/PDoomVideo) 的 `assets/pdoom.mp3` 复制到 `audio/original.mp3`（路径见 `songs/pdoom.json`）。
 - 没有显卡时用 SwiftShader 软件渲染；p5.brush 的真水彩晕染在软件渲染下太慢（每块 2 秒多），默认用“多层抖动平涂”模拟；有显卡时在页面地址加 `?realfill` 可换回真晕染。
 - 在浏览器里打开 `studio.html` 可以拖动进度条逐帧预览。
 
